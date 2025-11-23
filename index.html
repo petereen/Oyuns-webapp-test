@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="mn">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>OYUNS AIO - Валют Солих</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Loading Screen -->
+    <div id="loading-screen" class="screen active">
+        <div class="loading-spinner"></div>
+        <p>Уншиж байна...</p>
+    </div>
+
+    <!-- Main Exchange Screen -->
+    <div id="main-screen" class="screen">
+        <div class="header">
+            <h1>💱 Валют Солих</h1>
+            <p class="subtitle">OYUNS AIO</p>
+        </div>
+
+        <!-- Exchange Rates Display -->
+        <div class="rates-card">
+            <div class="rate-item">
+                <span class="rate-label">Авах ханш</span>
+                <span class="rate-value" id="buy-rate">-</span>
+            </div>
+            <div class="rate-item">
+                <span class="rate-label">Зарах ханш</span>
+                <span class="rate-value" id="sell-rate">-</span>
+            </div>
+        </div>
+
+        <!-- Direction Selection -->
+        <div class="direction-selector">
+            <button class="direction-btn active" data-direction="rub_mnt">
+                <span class="flag">🇷🇺</span>
+                <span>RUB → MNT</span>
+            </button>
+            <button class="direction-btn" data-direction="mnt_rub">
+                <span class="flag">🇲🇳</span>
+                <span>MNT → RUB</span>
+            </button>
+        </div>
+
+        <!-- Promo Code Section -->
+        <div class="promo-section" id="promo-section">
+            <input type="text" id="promo-input" placeholder="🎟️ Промокод оруулах (сонголттой)" class="promo-input">
+            <button id="apply-promo-btn" class="btn-secondary">Хэрэглэх</button>
+        </div>
+
+        <!-- Amount Selection -->
+        <div class="amount-section">
+            <label for="amount-input">💰 Солих дүн</label>
+            <div class="amount-input-wrapper">
+                <input type="number" id="amount-input" placeholder="0" min="0" step="0.01">
+                <span class="currency-display" id="currency-from">RUB</span>
+            </div>
+            
+            <!-- Quick Amount Buttons -->
+            <div class="quick-amounts" id="quick-amounts">
+                <!-- Will be populated by JS -->
+            </div>
+        </div>
+
+        <!-- Exchange Preview -->
+        <div class="exchange-preview" id="exchange-preview" style="display: none;">
+            <div class="preview-row">
+                <span>Таны дүн:</span>
+                <strong id="preview-from">-</strong>
+            </div>
+            <div class="arrow-down">↓</div>
+            <div class="preview-row">
+                <span>Хүлээн авах:</span>
+                <strong id="preview-to">-</strong>
+            </div>
+            <div class="preview-rate">
+                <span>Ханш:</span>
+                <span id="preview-rate">-</span>
+            </div>
+        </div>
+
+        <!-- Continue Button -->
+        <button id="continue-btn" class="btn-primary" disabled>Үргэлжлүүлэх</button>
+    </div>
+
+    <!-- Bank Selection Screen (for RUB → MNT) -->
+    <div id="bank-screen" class="screen">
+        <div class="header">
+            <button class="back-btn" onclick="goBack()">← Буцах</button>
+            <h2>💳 Банк сонгох</h2>
+        </div>
+        <div class="bank-list" id="bank-list">
+            <!-- Will be populated by JS -->
+        </div>
+    </div>
+
+    <!-- Payment Instructions Screen -->
+    <div id="payment-screen" class="screen">
+        <div class="header">
+            <button class="back-btn" onclick="goBack()">← Буцах</button>
+            <h2>💸 Гүйлгээний мэдээлэл</h2>
+        </div>
+        
+        <div class="payment-card">
+            <div class="invoice-display">
+                <span>Гүйлгээний дугаар:</span>
+                <code id="invoice-number">-</code>
+            </div>
+            
+            <div class="bank-details" id="bank-details">
+                <!-- Bank details will be shown here -->
+            </div>
+            
+            <div class="amount-display">
+                <div class="amount-item">
+                    <span>Гүйлгээний дүн:</span>
+                    <strong id="payment-amount">-</strong>
+                </div>
+            </div>
+        </div>
+
+        <div class="instructions">
+            <p>📸 Дараах дансаар гүйлгээ хийсний дараа шилжүүлэг хийсэн баримтаа зургаар оруулна уу.</p>
+        </div>
+
+        <button id="upload-receipt-btn" class="btn-primary">📸 Баримт оруулах</button>
+        <input type="file" id="receipt-input" accept="image/*" capture="environment" style="display: none;">
+    </div>
+
+    <!-- Receipt Upload Screen -->
+    <div id="receipt-screen" class="screen">
+        <div class="header">
+            <button class="back-btn" onclick="goBack()">← Буцах</button>
+            <h2>📸 Баримт оруулах</h2>
+        </div>
+        
+        <div class="upload-area" id="upload-area">
+            <div class="upload-placeholder">
+                <span class="upload-icon">📷</span>
+                <p>Зургаа энд дарж оруулна уу</p>
+                <p class="upload-hint">эсвэл камер ашиглан зураг авах</p>
+            </div>
+            <img id="receipt-preview" style="display: none;" alt="Receipt preview">
+        </div>
+        
+        <button id="submit-receipt-btn" class="btn-primary" disabled>Илгээх</button>
+    </div>
+
+    <!-- Bank Details Input Screen -->
+    <div id="bank-details-screen" class="screen">
+        <div class="header">
+            <button class="back-btn" onclick="goBack()">← Буцах</button>
+            <h2>🏦 Дансны мэдээлэл</h2>
+        </div>
+        
+        <div class="form-section">
+            <p class="info-text" id="bank-format-info">
+                Та өөрийн дансны мэдээллийг дараах форматаар оруулна уу
+            </p>
+            
+            <div class="saved-bank-option" id="saved-bank-option" style="display: none;">
+                <button class="btn-secondary" onclick="useSavedBank()">
+                    💾 Хадгалсан дансны мэдээллээ ашиглах
+                </button>
+            </div>
+            
+            <textarea 
+                id="bank-details-input" 
+                placeholder="Банк, Дансны дугаар, Данс эзэмшэгчийн нэр..."
+                rows="4"
+            ></textarea>
+            
+            <button id="submit-bank-btn" class="btn-primary" disabled>Илгээх</button>
+        </div>
+    </div>
+
+    <!-- Success Screen -->
+    <div id="success-screen" class="screen">
+        <div class="success-content">
+            <div class="success-icon">✅</div>
+            <h2>Амжилттай!</h2>
+            <p>Таны гүйлгээний хүсэлт хүлээн авлаа.</p>
+            <p class="success-note">Админ таны гүйлгээг баталгаажуулах хүртэл хүлээнэ үү.</p>
+            <button class="btn-primary" onclick="resetApp()">Шинэ гүйлгээ</button>
+        </div>
+    </div>
+
+    <!-- Error Toast -->
+    <div id="error-toast" class="toast">
+        <span id="error-message"></span>
+    </div>
+
+    <script src="config.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
+
