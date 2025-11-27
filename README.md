@@ -205,5 +205,3 @@ The Mini App works alongside your Python bot:
 ## License
 
 Same as the main OYUNS AIO bot project.
-
-# Oyuns-webapp-test
