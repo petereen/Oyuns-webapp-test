@@ -18,3 +18,18 @@ const VOLUME_DISCOUNT_MNT_2 = 0.3;
 const QUICK_AMOUNTS_RUB = [1000, 5000, 10000, 20000, 30000];
 const QUICK_AMOUNTS_MNT = [100000, 250000, 500000, 1000000, 3000000];
 
+// Telegram Auth Bypass (for local testing only)
+const TELEGRAM_AUTH_BYPASS = {
+    enabled: false,                // Set true to force bypass without query param
+    queryParam: 'tg-bypass',       // ?tg-bypass=1 enables, ?tg-bypass=0 disables
+    storageKey: 'oyuns-tg-bypass', // Remembers preference between reloads
+    skipVerification: true,        // Skip Supabase verification checks when bypassed
+    user: {
+        id: 999999999,
+        first_name: 'Local',
+        last_name: 'Tester',
+        username: 'oyuns_dev',
+        language_code: 'mn'
+    }
+};
+

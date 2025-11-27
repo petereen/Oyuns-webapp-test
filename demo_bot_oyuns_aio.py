@@ -8,7 +8,7 @@ import os
 import io
 from datetime import date
 from datetime import datetime, timedelta
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo, MenuButtonDefault
 from supabase import create_client, Client
 import os
 import re
@@ -46,6 +46,21 @@ def is_within_ub_business_hours():
 # Replace with your bot token
 BOT_TOKEN = "7842397817:AAHUp5gf_0QI8QPmp1_LFX7byNsjK9h5MEI"
 bot = telebot.TeleBot(BOT_TOKEN)
+MINI_APP_URL = os.environ.get("MINI_APP_URL", "https://earnest-brigadeiros-a41706.netlify.app/")
+
+
+def restore_default_menu_button():
+    """
+    Ensure the default slash-command menu stays available even when the mini app exists.
+    """
+    try:
+        bot.set_chat_menu_button(menu_button=MenuButtonDefault())
+        print("✅ Telegram menu button reset to default (commands available)")
+    except Exception as exc:
+        print(f"❌ Failed to reset menu button: {exc}")
+
+
+restore_default_menu_button()
 
 
 SUPABASE_URL = "https://ldolpsylyatkxqsgxhkn.supabase.co"
@@ -142,6 +157,22 @@ def terms_handler(message):
   markup = InlineKeyboardMarkup()
   markup.add(InlineKeyboardButton("📄 Хэрэглэгчийн гэрээ:", url="https://oyuns.mn/oyuns-aio-telegram-bot-%d1%85%d1%8d%d1%80%d1%8d%d0%b3%d0%bb%d1%8d%d0%b3%d1%87%d0%b8%d0%b9%d0%bd-%d0%b3%d1%8d%d1%80%d1%8d%d1%8d/"))
   bot.send_message(message.chat.id, "📄 Та хэрэглэгчийн гэрээг эндээс уншина уу.", reply_markup=markup)
+  
+
+@bot.message_handler(commands=['webapp', 'app', 'mini'])
+def open_mini_app(message):
+    markup = InlineKeyboardMarkup()
+    markup.add(
+        InlineKeyboardButton(
+            "💱 Валют Солих - Mini App",
+            web_app=WebAppInfo(url=MINI_APP_URL)
+        )
+    )
+    bot.send_message(
+        message.chat.id,
+        "📱 Mini App-ийг нээх бол доорх товчийг дарна уу:",
+        reply_markup=markup
+    )
     
 #-------------------GUILGEENII TUUH----------------------
 PAGE_SIZE = 5  # items per page
@@ -683,6 +714,7 @@ def main_menu():
         InlineKeyboardButton("📊 Ханш", callback_data="exchange_rate"),
         InlineKeyboardButton("ℹ️ Бот ашиглах заавар", callback_data="how_to_use"),
         InlineKeyboardButton("💱 Валют солих", callback_data="exchange_menu"),
+        InlineKeyboardButton("📱 Mini App", web_app=WebAppInfo(url=MINI_APP_URL)),
         InlineKeyboardButton("👤 Хэрэглэгчийн тохиргоо", callback_data="user_profile"),
         InlineKeyboardButton("✈️ Нислэг захиалга", callback_data="flight_booking"),
         InlineKeyboardButton("📝 Бүртгүүлэх", callback_data="start_registration")#,

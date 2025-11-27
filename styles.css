@@ -58,12 +58,16 @@ body {
 
 /* Loading Screen */
 #loading-screen {
-    display: flex;
+    display: none;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     min-height: 100vh;
     text-align: center;
+}
+
+#loading-screen.active {
+    display: flex;
 }
 
 .loading-spinner {

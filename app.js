@@ -1,7 +1,19 @@
-// Initialize Telegram Web App
-const tg = window.Telegram.WebApp;
-tg.ready();
-tg.expand();
+// Telegram auth bypass helpers
+const TELEGRAM_BYPASS_CONFIG = typeof TELEGRAM_AUTH_BYPASS !== 'undefined' ? TELEGRAM_AUTH_BYPASS : {};
+const TELEGRAM_BYPASS_STORAGE_KEY = TELEGRAM_BYPASS_CONFIG.storageKey || 'oyuns-tg-bypass';
+const TELEGRAM_BYPASS_QUERY_PARAM = TELEGRAM_BYPASS_CONFIG.queryParam || 'tg-bypass';
+
+// Initialize Telegram Web App (with optional bypass)
+const telegramAuthBypassed = determineTelegramBypass();
+const tg = window.Telegram?.WebApp || createTelegramShim(telegramAuthBypassed);
+
+if (tg.ready) tg.ready();
+if (tg.expand) tg.expand();
+
+if (telegramAuthBypassed) {
+    renderBypassBadge();
+}
+registerBypassConsoleHelpers(telegramAuthBypassed);
 
 // Initialize Supabase
 let supabaseClient;
@@ -14,6 +26,7 @@ let selectedAmount = 0;
 let selectedBank = null;
 let currentInvoice = null;
 let transactionData = {};
+const TELEGRAM_BYPASS_SKIP_VERIFICATION = telegramAuthBypassed && !!TELEGRAM_BYPASS_CONFIG.skipVerification;
 
 // App State
 let currentScreen = 'loading';
@@ -24,17 +37,26 @@ async function initApp() {
         // Initialize Supabase
         supabaseClient = supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey);
         
-        // Get Telegram user
-        const tgUser = tg.initDataUnsafe?.user;
-        if (!tgUser) {
-            showError('Telegram хэрэглэгчийн мэдээлэл олдсонгүй');
-            return;
+        // Get Telegram user or bypass profile
+        const tgUser = tg?.initDataUnsafe?.user;
+        
+        if (telegramAuthBypassed) {
+            currentUser = getBypassUserProfile();
+            console.warn('⚠️ Telegram auth bypass ENABLED. Using stub user:', currentUser);
+        } else {
+            if (!tgUser) {
+                showError('Telegram хэрэглэгчийн мэдээлэл олдсонгүй');
+                return;
+            }
+            currentUser = tgUser;
         }
         
-        currentUser = tgUser;
-        
-        // Check if user is verified
-        await checkUserVerification();
+        // Check if user is verified (unless bypass skip)
+        if (!TELEGRAM_BYPASS_SKIP_VERIFICATION) {
+            await checkUserVerification();
+        } else {
+            console.warn('⚠️ Skipping Supabase verification (Telegram bypass active)');
+        }
         
         // Load exchange rates
         await loadExchangeRates();
@@ -139,11 +161,15 @@ function setupEventListeners() {
     document.getElementById('continue-btn').addEventListener('click', handleContinue);
     
     // Receipt upload
+    const receiptInput = document.getElementById('receipt-input');
     document.getElementById('upload-receipt-btn').addEventListener('click', () => {
-        document.getElementById('receipt-input').click();
+        resetReceiptUI();
+        showScreen('receipt-screen');
+        receiptInput.value = '';
+        receiptInput.click();
     });
     
-    document.getElementById('receipt-input').addEventListener('change', handleReceiptUpload);
+    receiptInput.addEventListener('change', handleReceiptUpload);
     document.getElementById('submit-receipt-btn').addEventListener('click', submitReceipt);
     
     // Bank details
@@ -266,6 +292,7 @@ function calculateExchange(amount) {
     
     // Store transaction data
     transactionData = {
+        ...transactionData,
         amount,
         currencyFrom: currencyFrom.toLowerCase(),
         currencyTo: currencyTo.toLowerCase(),
@@ -501,6 +528,7 @@ async function showPaymentInstructions() {
 
 // Handle receipt upload
 function handleReceiptUpload(e) {
+    showScreen('receipt-screen');
     const file = e.target.files[0];
     if (!file) return;
     
@@ -531,50 +559,53 @@ async function submitReceipt() {
     }
     
     try {
-        tg.showPopup({
-            title: 'Уншиж байна...',
-            message: 'Баримтын зургийг хадгалж байна',
-            buttons: [{ type: 'ok' }]
-        });
+        if (!currentInvoice) {
+            showError('Гүйлгээний дугаар байхгүй байна. Буцаж дахин оролдоно уу.');
+            return;
+        }
+        
+        const submitBtn = document.getElementById('submit-receipt-btn');
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Илгээж байна...';
         
         // Upload to Supabase storage
-        const fileName = `${currentInvoice}_${currentUser.id}.jpg`;
-        const { data: uploadData, error: uploadError } = await supabaseClient.storage
+        const extension = file.type?.split('/')[1] || 'jpg';
+        const fileName = `${currentInvoice}_${currentUser.id}.${extension}`;
+        const { error: uploadError } = await supabaseClient.storage
             .from('bills')
             .upload(fileName, file, {
-                contentType: 'image/jpeg',
+                contentType: file.type || 'image/jpeg',
                 upsert: true
             });
         
         if (uploadError) throw uploadError;
         
         // Get public URL
-        const { data: urlData } = supabaseClient.storage
+        const { data: urlData, error: urlError } = supabaseClient.storage
             .from('bills')
             .getPublicUrl(fileName);
         
-        // Get file ID from Telegram (we'll need to send it to bot or store differently)
-        // For now, we'll use the file name
+        if (urlError) throw urlError;
         
-        // Update transaction with receipt
-        const { error: updateError } = await supabase
-            .from('transactions')
-            .update({
-                bill_id: fileName,
-                receipt_id: fileName,
-                bill_url: urlData.publicUrl
-            })
-            .eq('invoice', currentInvoice);
+        transactionData.receiptId = fileName;
+        transactionData.billUrl = urlData?.publicUrl || null;
         
-        if (updateError) throw updateError;
+        fileInput.value = '';
+        resetReceiptUI();
         
-        // Move to bank details screen
-        checkSavedBank();
+        await checkSavedBank();
         showScreen('bank-details-screen');
+        showError('✅ Баримт амжилттай илгээгдлээ', 'success');
         
     } catch (error) {
         console.error('Submit receipt error:', error);
         showError('Баримт илгээхэд алдаа гарлаа');
+    } finally {
+        const submitBtn = document.getElementById('submit-receipt-btn');
+        submitBtn.textContent = 'Илгээх';
+        const preview = document.getElementById('receipt-preview');
+        const hasPreview = preview && preview.style.display === 'block';
+        submitBtn.disabled = !hasPreview;
     }
 }
 
@@ -657,22 +688,32 @@ async function submitBankDetails() {
     
     try {
         // Create transaction
-        const { error: txnError } = await supabase
+        const payload = {
+            user_id: currentUser.id,
+            invoice: currentInvoice,
+            amount: transactionData.amount,
+            currency_from: transactionData.currencyFrom,
+            currency_to: transactionData.currencyTo,
+            rate: transactionData.rate,
+            buy_rate: exchangeRates.BUY_RATE,
+            sell_rate: exchangeRates.SELL_RATE,
+            bank_details: bankDetails,
+            status: 'pending',
+            promo_code: promoCode,
+            timestamp: new Date().toISOString()
+        };
+        
+        if (transactionData.receiptId) {
+            payload.receipt_id = transactionData.receiptId;
+            payload.bill_id = transactionData.receiptId;
+        }
+        if (transactionData.billUrl) {
+            payload.bill_url = transactionData.billUrl;
+        }
+        
+        const { error: txnError } = await supabaseClient
             .from('transactions')
-            .insert({
-                user_id: currentUser.id,
-                invoice: currentInvoice,
-                amount: transactionData.amount,
-                currency_from: transactionData.currencyFrom,
-                currency_to: transactionData.currencyTo,
-                rate: transactionData.rate,
-                buy_rate: exchangeRates.BUY_RATE,
-                sell_rate: exchangeRates.SELL_RATE,
-                bank_details: bankDetails,
-                status: 'pending',
-                promo_code: promoCode,
-                timestamp: new Date().toISOString()
-            });
+            .insert(payload);
         
         if (txnError) throw txnError;
         
@@ -725,8 +766,7 @@ function resetApp() {
     document.getElementById('promo-input').value = '';
     document.getElementById('receipt-input').value = '';
     document.getElementById('bank-details-input').value = '';
-    document.getElementById('receipt-preview').style.display = 'none';
-    document.querySelector('.upload-placeholder').style.display = 'block';
+    resetReceiptUI();
     
     updateCurrencyDisplay();
     updateQuickAmounts();
@@ -745,6 +785,171 @@ function showError(message, type = 'error') {
     setTimeout(() => {
         toast.classList.remove('show');
     }, 3000);
+}
+
+function resetReceiptUI() {
+    const preview = document.getElementById('receipt-preview');
+    if (preview) {
+        preview.style.display = 'none';
+        preview.removeAttribute('src');
+    }
+    const placeholder = document.querySelector('.upload-placeholder');
+    if (placeholder) {
+        placeholder.style.display = 'block';
+    }
+    const submitBtn = document.getElementById('submit-receipt-btn');
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Илгээх';
+    }
+}
+
+// === Telegram bypass helpers ===
+function determineTelegramBypass() {
+    if (typeof window === 'undefined') return false;
+    let forced = null;
+    if (TELEGRAM_BYPASS_QUERY_PARAM) {
+        try {
+            const params = new URLSearchParams(window.location.search);
+            if (params.has(TELEGRAM_BYPASS_QUERY_PARAM)) {
+                const raw = params.get(TELEGRAM_BYPASS_QUERY_PARAM);
+                forced = !isFalseyFlag(raw);
+                persistBypassPreference(forced);
+            }
+        } catch (err) {
+            console.warn('Telegram bypass query parsing failed:', err);
+        }
+    }
+    
+    if (forced !== null) return forced;
+    
+    const stored = readBypassPreference();
+    if (stored !== null) return stored;
+    
+    return !!TELEGRAM_BYPASS_CONFIG.enabled;
+}
+
+function createTelegramShim(useBypassUser) {
+    const stubUser = useBypassUser ? getBypassUserProfile() : null;
+    return {
+        ready: () => {},
+        expand: () => {},
+        initDataUnsafe: stubUser ? { user: stubUser } : {},
+        showAlert: (message) => {
+            if (typeof alert !== 'undefined') {
+                alert(message);
+            } else {
+                console.log('Telegram alert:', message);
+            }
+        },
+        close: () => {
+            console.log('Telegram WebApp close requested (stub).');
+        },
+        showPopup: (payload) => {
+            const title = payload?.title || 'Telegram Popup';
+            const message = payload?.message || '';
+            if (typeof alert !== 'undefined') {
+                alert(`${title}\n\n${message}`);
+            } else {
+                console.log('Telegram popup:', title, message);
+            }
+        }
+    };
+}
+
+function getBypassUserProfile() {
+    const fallback = {
+        id: 111111111,
+        first_name: 'MiniApp',
+        last_name: 'Tester',
+        username: 'miniapp_tester',
+        language_code: 'en'
+    };
+    return { ...fallback, ...(TELEGRAM_BYPASS_CONFIG.user || {}) };
+}
+
+function isFalseyFlag(value) {
+    if (value === null || value === undefined) return false;
+    const normalized = String(value).trim().toLowerCase();
+    return ['0', 'false', 'off', 'no'].includes(normalized);
+}
+
+function readBypassPreference() {
+    try {
+        const value = window.localStorage.getItem(TELEGRAM_BYPASS_STORAGE_KEY);
+        if (value === null) return null;
+        return value === '1';
+    } catch (err) {
+        console.warn('Cannot read bypass preference:', err);
+        return null;
+    }
+}
+
+function persistBypassPreference(enabled) {
+    try {
+        if (enabled) {
+            window.localStorage.setItem(TELEGRAM_BYPASS_STORAGE_KEY, '1');
+        } else {
+            window.localStorage.removeItem(TELEGRAM_BYPASS_STORAGE_KEY);
+        }
+    } catch (err) {
+        console.warn('Cannot persist bypass preference:', err);
+    }
+}
+
+function registerBypassConsoleHelpers(isEnabled) {
+    if (typeof window === 'undefined') return;
+    window.TelegramAuthBypass = {
+        enable() {
+            persistBypassPreference(true);
+            window.location.reload();
+        },
+        disable() {
+            persistBypassPreference(false);
+            window.location.reload();
+        },
+        toggle() {
+            const current = readBypassPreference();
+            const next = current === null ? !isEnabled : !current;
+            persistBypassPreference(next);
+            window.location.reload();
+        },
+        status: isEnabled,
+        getStatus() {
+            const stored = readBypassPreference();
+            return stored === null ? isEnabled : stored;
+        }
+    };
+}
+
+function renderBypassBadge() {
+    if (typeof document === 'undefined') return;
+    const inject = () => {
+        if (document.getElementById('telegram-bypass-indicator')) return;
+        const badge = document.createElement('div');
+        badge.id = 'telegram-bypass-indicator';
+        badge.textContent = 'DEV MODE · Telegram bypass ON';
+        badge.style.position = 'fixed';
+        badge.style.top = '10px';
+        badge.style.right = '10px';
+        badge.style.zIndex = '9999';
+        badge.style.background = 'rgba(255, 165, 0, 0.95)';
+        badge.style.color = '#000';
+        badge.style.fontSize = '11px';
+        badge.style.padding = '6px 10px';
+        badge.style.borderRadius = '999px';
+        badge.style.boxShadow = '0 2px 6px rgba(0,0,0,0.2)';
+        badge.style.fontWeight = '600';
+        badge.style.textTransform = 'uppercase';
+        badge.style.letterSpacing = '0.5px';
+        document.body.appendChild(badge);
+    };
+    
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', inject, { once: true });
+    } else {
+        inject();
+    }
 }
 
 // Initialize when DOM is ready

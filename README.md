@@ -87,7 +87,7 @@ FOR SELECT USING (is_active = true);
 - Allow authenticated users to upload files
 - Allow users to read their own files
 
-### 4. Deploy the Web App
+### 4. Deploy the Web App t
 
 You can deploy this Mini App to any static hosting service:
 
